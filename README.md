@@ -89,6 +89,65 @@ This deployment creates a complete Ansible Tower HA environment with:
 - DNS resolution or /etc/hosts entries configured
 - Firewall rules allowing required ports (configured automatically)
 
+## Flexible Inventory System
+
+This deployment supports multiple inventory configurations to accommodate different environments:
+
+### Deployment Modes
+
+#### 1. Static IP Assignment (Default)
+- **Use case**: On-premises deployments, controlled networking
+- **Configuration**: Set `use_static_ips: true`
+- **Features**: IPs assigned within defined subnet ranges
+- **Example**: Tower nodes use 192.168.1.10-19, Database nodes use 192.168.1.20-29
+
+#### 2. Dynamic DNS Assignment
+- **Use case**: DNS-managed environments, hybrid deployments
+- **Configuration**: Set `use_static_ips: false` with `ansible_domain`
+- **Features**: Hosts resolved via DNS (hostname.domain.com)
+- **Example**: tower-node1.internal.company.com
+
+#### 3. Cloud Provider Dynamic
+- **Use case**: AWS EC2, Azure VMs, GCP Compute Engine
+- **Configuration**: Use cloud provider inventory plugins
+- **Features**: Automatic discovery via instance tags/labels
+- **Example**: AWS EC2 instances tagged with Role=tower
+
+#### 4. Mixed Environments
+- **Use case**: Hybrid cloud + on-premises deployments
+- **Configuration**: Per-host overrides combining static and dynamic
+- **Features**: Different assignment modes per component
+- **Example**: On-prem databases with cloud Tower nodes
+
+### Available Inventory Examples
+
+The `inventory/examples/` directory contains ready-to-use configurations:
+
+- `static-custom-subnets.yml` - Static IPs with custom subnet ranges
+- `dynamic-dns.yml` - DNS-based hostname resolution
+- `aws-ec2-dynamic.yml` - AWS EC2 dynamic inventory with tag-based grouping
+- `azure-dynamic.yml` - Azure VM dynamic inventory
+- `gcp-dynamic.yml` - Google Cloud Platform dynamic inventory
+- `mixed-environment.yml` - Hybrid static/dynamic deployment
+
+### Quick Configuration
+
+```bash
+# Static deployment (default)
+cp inventory/hosts.yml inventory/my-hosts.yml
+# Edit IP addresses and deploy
+
+# DNS-based deployment
+cp inventory/examples/dynamic-dns.yml inventory/my-hosts.yml
+# Set ansible_domain and deploy
+
+# AWS cloud deployment
+cp inventory/examples/aws-ec2-dynamic.yml inventory/my-hosts.yml
+# Tag EC2 instances and deploy
+```
+
+For detailed configuration instructions, see `inventory/examples/README.md`.
+
 ## Quick Start
 
 ### 1. Clone/Copy the Deployment
@@ -99,12 +158,44 @@ cd ansible-tower-ha
 
 ### 2. Configure Inventory
 
-Edit `inventory/hosts.yml` with your actual IP addresses and hostnames:
+The inventory system is flexible and supports multiple deployment modes. Choose the approach that fits your environment:
+
+#### Option A: Static IP Deployment (Default)
+Edit `inventory/hosts.yml` with your IP addresses:
 
 ```yaml
+# Set deployment mode
+use_static_ips: true
+
+# Update network configuration for your environment
+network_config:
+  base_network: "192.168.1.0/24"
+  subnets:
+    tower_subnet: "192.168.1.10-19"        # Adjust to your network
+    database_subnet: "192.168.1.20-29"
+    # ... other subnets
+
+# Hosts will use static IPs within defined ranges
 tower-node1:
-  ansible_host: YOUR_IP_HERE
-  ansible_user: YOUR_USER
+  ansible_host: "192.168.1.11"  # Or use template: "{{ '192.168.1.11' if use_static_ips else ... }}"
+  ansible_user: ansible
+```
+
+#### Option B: Use Pre-built Examples
+Copy and customize an example inventory:
+
+```bash
+# For static deployment with custom subnets
+cp inventory/examples/static-custom-subnets.yml inventory/hosts.yml
+
+# For DNS-based deployment
+cp inventory/examples/dynamic-dns.yml inventory/hosts.yml
+
+# For AWS EC2 deployment
+cp inventory/examples/aws-ec2-dynamic.yml inventory/hosts.yml
+
+# Then edit the copied file for your environment
+vim inventory/hosts.yml
 ```
 
 ### 3. Configure Variables
@@ -380,20 +471,29 @@ systemctl status grafana-server
 ```
 ansible-tower-ha/
 ├── inventory/
-│   └── hosts.yml                    # Inventory file
+│   ├── hosts.yml                    # Main inventory file (flexible assignment)
+│   └── examples/                    # Example inventory configurations
+│       ├── README.md                # Inventory configuration guide
+│       ├── static-custom-subnets.yml # Static IPs with custom subnets
+│       ├── dynamic-dns.yml          # DNS-based hostname resolution
+│       ├── aws-ec2-dynamic.yml      # AWS EC2 dynamic inventory
+│       ├── azure-dynamic.yml        # Azure VM dynamic inventory
+│       ├── gcp-dynamic.yml          # GCP Compute Engine dynamic inventory
+│       └── mixed-environment.yml    # Hybrid static/dynamic deployment
 ├── group_vars/
 │   ├── all.yml                      # Global variables
-│   └── vault.yml.example            # Vault template
+│   └── vault.yml.example            # Vault template (expanded)
 ├── roles/
 │   ├── postgresql_ha/               # PostgreSQL HA role
 │   ├── tower_ha/                    # Tower HA role
 │   ├── collection_dev/              # Collection development role
-│   ├── monitoring/                  # Monitoring stack role
+│   ├── monitoring/                  # Monitoring stack role (Prometheus/Grafana)
 │   └── remote_control/              # Semaphore role
 ├── templates/
 │   ├── haproxy.cfg.j2              # HAProxy configuration
 │   └── keepalived.conf.j2          # Keepalived configuration
 ├── site.yml                         # Main playbook
+├── .gitignore                       # Git ignore file
 └── README.md                        # This file
 ```
 

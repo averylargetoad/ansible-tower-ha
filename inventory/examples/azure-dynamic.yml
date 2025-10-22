@@ -1,0 +1,121 @@
+---
+# Example: Azure Dynamic Inventory
+# Use this for Azure environments with VMs tagged for roles
+
+# This uses the Azure dynamic inventory plugin
+plugin: azure.azcollection.azure_rm
+
+# Azure Configuration
+auth_source: auto  # Use managed identity, service principal, or CLI auth
+
+# Filter VMs
+include_vm_resource_groups:
+  - ansible-tower-rg  # Your resource group name
+
+# Filter by tags
+conditional_groups:
+  # Create groups based on tags
+  tower_cluster: "tags.role == 'tower'"
+  database_cluster: "tags.role == 'database'"
+  load_balancers: "tags.role == 'loadbalancer'"
+  collection_dev: "tags.role == 'development'"
+  monitoring: "tags.role == 'monitoring'"
+  remote_control: "tags.role == 'control'"
+
+# Group by additional criteria
+keyed_groups:
+  # Group by role
+  - key: tags.role
+    prefix: role
+    separator: "_"
+
+  # Group by location
+  - key: location
+    prefix: location
+    separator: "_"
+
+  # Group by resource group
+  - key: resource_group
+    prefix: rg
+    separator: "_"
+
+# Compose variables from VM metadata
+compose:
+  # Use private IP as ansible_host
+  ansible_host: network_interface[0].ip_configurations[0].private_ip_address
+
+  # Set ansible user from tags or default
+  ansible_user: tags.ansible_user | default('azureuser')
+
+  # VM-specific variables
+  azure_vm_id: vm_id
+  azure_vm_size: vm_size
+  azure_location: location
+  azure_resource_group: resource_group
+
+  # PostgreSQL role from tag
+  postgresql_role: tags.postgresql_role | default('') | lower
+
+  # Keepalived priority from tag
+  keepalived_priority: tags.keepalived_priority | default(50) | int
+
+  # Static IP equivalent
+  static_ip: network_interface[0].ip_configurations[0].private_ip_address
+
+# Global variables
+all:
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+    ansible_become: true
+    ansible_become_method: sudo
+    use_static_ips: false  # Using Azure dynamic assignment
+
+    # Network configuration
+    network_config:
+      vips:
+        # Set this to your Azure Load Balancer frontend IP
+        loadbalancer_vip: "{{ vault_azure_loadbalancer_vip }}"
+
+  children:
+    tower_cluster:
+      vars:
+        tower_admin_password: "{{ vault_tower_admin_password }}"
+        tower_pg_password: "{{ vault_tower_pg_password }}"
+
+    database_cluster:
+      vars:
+        postgresql_version: 13
+        postgresql_replication_password: "{{ vault_pg_replication_password }}"
+
+    load_balancers:
+      vars:
+        keepalived_vip: "{{ network_config.vips.loadbalancer_vip }}"
+
+    collection_dev:
+      vars:
+        collection_namespace: myorg
+
+    monitoring:
+      vars:
+        grafana_admin_password: "{{ vault_grafana_admin_password }}"
+
+    remote_control:
+      vars:
+        semaphore_admin_password: "{{ vault_semaphore_admin_password }}"
+
+# Required Azure VM Tags for this inventory:
+#
+# role: tower | database | loadbalancer | development | monitoring | control
+# component: tower-node1 | db-primary | lb-node1 | dev-server | etc.
+# environment: production | staging | development
+# project: ansible-tower-ha
+# ansible_user: azureuser | ubuntu (optional, defaults to azureuser)
+# postgresql_role: primary | standby (for database VMs only)
+# keepalived_priority: 100 | 90 (for load balancer VMs only)
+#
+# Example tags for a Tower VM:
+# - role: tower
+# - component: tower-node1
+# - environment: production
+# - project: ansible-tower-ha
+# - ansible_user: azureuser

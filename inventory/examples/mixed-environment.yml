@@ -1,0 +1,163 @@
+---
+# Example: Mixed Environment - Static + Dynamic Assignment
+# Use this when you have some static servers and some dynamic/cloud instances
+
+all:
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+    ansible_become: true
+    ansible_become_method: sudo
+
+    # Mixed mode - individual hosts can override
+    use_static_ips: true
+
+    # Network configuration
+    network_config:
+      base_network: "192.168.1.0/24"
+      subnets:
+        tower_subnet: "192.168.1.10-19"
+        database_subnet: "192.168.1.20-29"
+        loadbalancer_subnet: "192.168.1.30-39"
+        services_subnet: "192.168.1.40-69"
+      vips:
+        loadbalancer_vip: "192.168.1.30"
+
+    # DNS configuration for dynamic hosts
+    ansible_domain: "internal.company.com"
+    default_ansible_user: ansible
+
+  children:
+    # Tower nodes - Mix of static on-prem and dynamic cloud
+    tower_cluster:
+      hosts:
+        # Static on-premises Tower nodes
+        tower-node1:
+          ansible_host: "192.168.1.11"  # Static IP override
+          ansible_user: "{{ default_ansible_user }}"
+          static_ip: "192.168.1.11"
+          deployment_type: "on-premises"
+
+        tower-node2:
+          ansible_host: "192.168.1.12"
+          ansible_user: "{{ default_ansible_user }}"
+          static_ip: "192.168.1.12"
+          deployment_type: "on-premises"
+
+        # Dynamic cloud Tower node
+        tower-node3-cloud:
+          ansible_host: "{{ inventory_hostname }}.{{ ansible_domain }}"
+          ansible_user: "ubuntu"  # Different user for cloud
+          deployment_type: "cloud"
+          # Static IP not set - will use dynamic
+
+      vars:
+        tower_admin_password: "{{ vault_tower_admin_password }}"
+        tower_pg_password: "{{ vault_tower_pg_password }}"
+
+    # Database cluster - All static for consistency
+    database_cluster:
+      hosts:
+        db-primary:
+          ansible_host: "192.168.1.21"
+          ansible_user: "{{ default_ansible_user }}"
+          postgresql_role: primary
+          static_ip: "192.168.1.21"
+          deployment_type: "on-premises"
+
+        db-standby1:
+          ansible_host: "192.168.1.22"
+          ansible_user: "{{ default_ansible_user }}"
+          postgresql_role: standby
+          static_ip: "192.168.1.22"
+          deployment_type: "on-premises"
+
+        # Cloud standby for DR
+        db-standby2-cloud:
+          ansible_host: "db-standby2-cloud.{{ ansible_domain }}"
+          ansible_user: "ubuntu"
+          postgresql_role: standby
+          deployment_type: "cloud-dr"
+
+      vars:
+        postgresql_version: 13
+        postgresql_replication_password: "{{ vault_pg_replication_password }}"
+
+    # Load balancers - Static with cloud backup
+    load_balancers:
+      hosts:
+        lb-node1:
+          ansible_host: "192.168.1.31"
+          ansible_user: "{{ default_ansible_user }}"
+          static_ip: "192.168.1.31"
+          keepalived_priority: 100
+          deployment_type: "on-premises"
+
+        # Cloud-based backup load balancer
+        lb-node2-cloud:
+          ansible_host: "lb-node2-cloud.{{ ansible_domain }}"
+          ansible_user: "ubuntu"
+          keepalived_priority: 50  # Lower priority
+          deployment_type: "cloud-backup"
+
+      vars:
+        keepalived_vip: "{{ network_config.vips.loadbalancer_vip }}"
+
+    # Services can be mixed based on requirements
+    collection_dev:
+      hosts:
+        # On-premises dev server
+        dev-server:
+          ansible_host: "192.168.1.40"
+          ansible_user: "{{ default_ansible_user }}"
+          static_ip: "192.168.1.40"
+          deployment_type: "on-premises"
+
+        # Cloud dev server for remote developers
+        dev-server-cloud:
+          ansible_host: "dev-server-cloud.{{ ansible_domain }}"
+          ansible_user: "ubuntu"
+          deployment_type: "cloud"
+
+      vars:
+        collection_namespace: myorg
+
+    monitoring:
+      hosts:
+        # Monitoring stays on-premises for security
+        monitoring-server:
+          ansible_host: "192.168.1.50"
+          ansible_user: "{{ default_ansible_user }}"
+          static_ip: "192.168.1.50"
+          deployment_type: "on-premises"
+
+      vars:
+        grafana_admin_password: "{{ vault_grafana_admin_password }}"
+
+    remote_control:
+      hosts:
+        # Remote control can be cloud-based
+        control-server:
+          ansible_host: "control-server.{{ ansible_domain }}"
+          ansible_user: "ubuntu"
+          deployment_type: "cloud"
+
+      vars:
+        semaphore_admin_password: "{{ vault_semaphore_admin_password }}"
+
+# Deployment strategy notes:
+#
+# ON-PREMISES HOSTS:
+# - Use static IPs for predictable networking
+# - Typically use 'ansible' user
+# - Require manual IP management
+#
+# CLOUD HOSTS:
+# - Use DNS resolution or cloud inventory plugins
+# - May use different users (ubuntu, ec2-user, etc.)
+# - IP addresses managed by cloud provider
+#
+# MIXED BENEFITS:
+# - On-prem for core services (DB, monitoring)
+# - Cloud for scalable components (Tower nodes)
+# - Hybrid DR and backup strategies
+# - Cost optimization

@@ -1,0 +1,144 @@
+---
+# Example: Google Cloud Platform Dynamic Inventory
+# Use this for GCP environments with Compute Engine instances labeled for roles
+
+# This uses the GCP dynamic inventory plugin
+plugin: google.cloud.gcp_compute
+
+# GCP Configuration
+projects:
+  - my-ansible-tower-project  # Your GCP project ID
+
+# Authentication - use service account key or application default credentials
+# service_account_file: /path/to/service-account.json  # Optional if using ADC
+
+# Filter instances
+filters: []  # Add filters if needed, e.g., status = RUNNING
+
+# Zones to include
+zones:
+  - us-central1-a
+  - us-central1-b
+  - us-central1-c
+
+# Group instances by labels
+keyed_groups:
+  # Group by role label
+  - key: labels.role
+    prefix: role
+    separator: "_"
+
+  # Group by environment
+  - key: labels.environment
+    prefix: env
+    separator: "_"
+
+  # Group by zone
+  - key: zone
+    prefix: zone
+    separator: "_"
+
+  # Group by machine type
+  - key: machineType
+    prefix: machine_type
+    separator: "_"
+
+# Conditional groups based on labels
+groups:
+  # Create groups based on role labels
+  tower_cluster: "labels.role == 'tower'"
+  database_cluster: "labels.role == 'database'"
+  load_balancers: "labels.role == 'loadbalancer'"
+  collection_dev: "labels.role == 'development'"
+  monitoring: "labels.role == 'monitoring'"
+  remote_control: "labels.role == 'control'"
+
+  # Environment-based groups
+  production: "labels.environment == 'production'"
+  staging: "labels.environment == 'staging'"
+
+# Compose variables from instance metadata
+compose:
+  # Use private IP as ansible_host
+  ansible_host: networkInterfaces[0].networkIP
+
+  # Set ansible user from labels or default
+  ansible_user: labels.ansible_user | default('ansible')
+
+  # GCP-specific variables
+  gcp_instance_id: id
+  gcp_machine_type: machineType.split('/')[-1]
+  gcp_zone: zone.split('/')[-1]
+  gcp_project: project
+
+  # PostgreSQL role from label
+  postgresql_role: labels.postgresql_role | default('') | lower
+
+  # Keepalived priority from label
+  keepalived_priority: labels.keepalived_priority | default(50) | int
+
+  # Static IP equivalent
+  static_ip: networkInterfaces[0].networkIP
+
+  # External IP if available
+  public_ip: networkInterfaces[0].accessConfigs[0].natIP if networkInterfaces[0].accessConfigs else ''
+
+# Global variables
+all:
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+    ansible_become: true
+    ansible_become_method: sudo
+    use_static_ips: false  # Using GCP dynamic assignment
+
+    # Network configuration
+    network_config:
+      vips:
+        # Set this to your GCP Load Balancer IP or reserved static IP
+        loadbalancer_vip: "{{ vault_gcp_loadbalancer_vip }}"
+
+  children:
+    tower_cluster:
+      vars:
+        tower_admin_password: "{{ vault_tower_admin_password }}"
+        tower_pg_password: "{{ vault_tower_pg_password }}"
+
+    database_cluster:
+      vars:
+        postgresql_version: 13
+        postgresql_replication_password: "{{ vault_pg_replication_password }}"
+
+    load_balancers:
+      vars:
+        keepalived_vip: "{{ network_config.vips.loadbalancer_vip }}"
+
+    collection_dev:
+      vars:
+        collection_namespace: myorg
+
+    monitoring:
+      vars:
+        grafana_admin_password: "{{ vault_grafana_admin_password }}"
+
+    remote_control:
+      vars:
+        semaphore_admin_password: "{{ vault_semaphore_admin_password }}"
+
+# Required GCP Instance Labels for this inventory:
+#
+# role: tower | database | loadbalancer | development | monitoring | control
+# component: tower-node1 | db-primary | lb-node1 | dev-server | etc.
+# environment: production | staging | development
+# project: ansible-tower-ha
+# ansible-user: ansible | ubuntu | centos (optional, defaults to ansible)
+# postgresql-role: primary | standby (for database instances only)
+# keepalived-priority: 100 | 90 (for load balancer instances only)
+#
+# Example labels for a Tower instance:
+# - role: tower
+# - component: tower-node1
+# - environment: production
+# - project: ansible-tower-ha
+# - ansible-user: ansible
+#
+# Note: GCP labels use hyphens, not underscores

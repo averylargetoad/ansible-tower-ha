@@ -1,0 +1,111 @@
+---
+# Example: Static IP Assignment with Custom Subnets
+# Use this when you need to deploy in a specific network environment
+
+all:
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+    ansible_become: true
+    ansible_become_method: sudo
+
+    # Enable static IP assignment
+    use_static_ips: true
+
+    # Custom network configuration for your environment
+    network_config:
+      base_network: "10.0.0.0/16"  # Change to your network
+      subnets:
+        tower_subnet: "10.0.10.1-10.0.10.50"        # Tower nodes
+        database_subnet: "10.0.20.1-10.0.20.50"     # Database nodes
+        loadbalancer_subnet: "10.0.30.1-10.0.30.50" # Load balancers
+        services_subnet: "10.0.40.1-10.0.40.100"    # Other services
+
+      # VIP configuration
+      vips:
+        loadbalancer_vip: "10.0.30.100"
+
+    # Custom connection settings
+    default_ansible_user: ubuntu  # or centos, ec2-user, etc.
+    default_ssh_port: 22
+
+  children:
+    tower_cluster:
+      hosts:
+        tower-node1:
+          ansible_host: "10.0.10.11"
+          ansible_user: "{{ default_ansible_user }}"
+          static_ip: "10.0.10.11"
+        tower-node2:
+          ansible_host: "10.0.10.12"
+          ansible_user: "{{ default_ansible_user }}"
+          static_ip: "10.0.10.12"
+        tower-node3:
+          ansible_host: "10.0.10.13"
+          ansible_user: "{{ default_ansible_user }}"
+          static_ip: "10.0.10.13"
+      vars:
+        tower_admin_password: "{{ vault_tower_admin_password }}"
+        tower_pg_password: "{{ vault_tower_pg_password }}"
+
+    database_cluster:
+      hosts:
+        db-primary:
+          ansible_host: "10.0.20.11"
+          ansible_user: "{{ default_ansible_user }}"
+          postgresql_role: primary
+          static_ip: "10.0.20.11"
+        db-standby1:
+          ansible_host: "10.0.20.12"
+          ansible_user: "{{ default_ansible_user }}"
+          postgresql_role: standby
+          static_ip: "10.0.20.12"
+        db-standby2:
+          ansible_host: "10.0.20.13"
+          ansible_user: "{{ default_ansible_user }}"
+          postgresql_role: standby
+          static_ip: "10.0.20.13"
+      vars:
+        postgresql_version: 13
+        postgresql_replication_password: "{{ vault_pg_replication_password }}"
+
+    load_balancers:
+      hosts:
+        lb-node1:
+          ansible_host: "10.0.30.11"
+          ansible_user: "{{ default_ansible_user }}"
+          static_ip: "10.0.30.11"
+          keepalived_priority: 100
+        lb-node2:
+          ansible_host: "10.0.30.12"
+          ansible_user: "{{ default_ansible_user }}"
+          static_ip: "10.0.30.12"
+          keepalived_priority: 90
+      vars:
+        keepalived_vip: "{{ network_config.vips.loadbalancer_vip }}"
+
+    collection_dev:
+      hosts:
+        dev-server:
+          ansible_host: "10.0.40.11"
+          ansible_user: "{{ default_ansible_user }}"
+          static_ip: "10.0.40.11"
+      vars:
+        collection_namespace: myorg
+
+    monitoring:
+      hosts:
+        monitoring-server:
+          ansible_host: "10.0.40.21"
+          ansible_user: "{{ default_ansible_user }}"
+          static_ip: "10.0.40.21"
+      vars:
+        grafana_admin_password: "{{ vault_grafana_admin_password }}"
+
+    remote_control:
+      hosts:
+        control-server:
+          ansible_host: "10.0.40.31"
+          ansible_user: "{{ default_ansible_user }}"
+          static_ip: "10.0.40.31"
+      vars:
+        semaphore_admin_password: "{{ vault_semaphore_admin_password }}"

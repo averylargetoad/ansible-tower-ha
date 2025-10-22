@@ -1,0 +1,127 @@
+---
+# Example: AWS EC2 Dynamic Inventory
+# Use this for AWS environments with EC2 instances tagged for roles
+
+# This uses the AWS EC2 dynamic inventory plugin
+plugin: amazon.aws.aws_ec2
+
+# AWS Configuration
+regions:
+  - us-east-1
+  - us-west-2
+
+# Authentication (use AWS credentials in environment or IAM role)
+# aws_access_key: "{{ vault_aws_access_key }}"  # Optional if using IAM/env vars
+# aws_secret_key: "{{ vault_aws_secret_key }}"  # Optional if using IAM/env vars
+
+# Instance filters - tag your EC2 instances appropriately
+filters:
+  # Only include running instances
+  instance-state-name: running
+
+  # Filter by environment tag
+  tag:Environment: production
+
+  # Filter by project tag
+  tag:Project: ansible-tower-ha
+
+# Group instances by tags
+keyed_groups:
+  # Group by Role tag
+  - key: tags.Role
+    prefix: role
+    separator: "_"
+
+  # Group by Component tag for more granular control
+  - key: tags.Component
+    prefix: component
+    separator: "_"
+
+  # Group by AZ for geographic awareness
+  - key: placement.availability_zone
+    prefix: az
+    separator: "_"
+
+# Compose variables from instance metadata
+compose:
+  # Use private IP as ansible_host
+  ansible_host: private_ip_address
+
+  # Set user based on AMI/OS
+  ansible_user: tags.AnsibleUser | default('ec2-user')
+
+  # Set PostgreSQL role from tag
+  postgresql_role: tags.PostgreSQLRole | default('') | lower
+
+  # Set keepalived priority from tag
+  keepalived_priority: tags.KeepalivedPriority | default(50) | int
+
+  # Custom variables from tags
+  static_ip: private_ip_address
+  ec2_instance_id: instance_id
+  ec2_instance_type: instance_type
+
+# Global variables
+all:
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+    ansible_become: true
+    ansible_become_method: sudo
+    use_static_ips: false  # Using dynamic EC2 assignment
+
+    # Network configuration from tags or override
+    network_config:
+      vips:
+        # Set this to your Elastic IP or ALB endpoint
+        loadbalancer_vip: "{{ vault_aws_loadbalancer_vip }}"
+
+  children:
+    # Map role-based groups to our expected structure
+    tower_cluster:
+      hosts: "{{ groups.get('role_tower', []) }}"
+      vars:
+        tower_admin_password: "{{ vault_tower_admin_password }}"
+        tower_pg_password: "{{ vault_tower_pg_password }}"
+
+    database_cluster:
+      hosts: "{{ groups.get('role_database', []) }}"
+      vars:
+        postgresql_version: 13
+        postgresql_replication_password: "{{ vault_pg_replication_password }}"
+
+    load_balancers:
+      hosts: "{{ groups.get('role_loadbalancer', []) }}"
+      vars:
+        keepalived_vip: "{{ network_config.vips.loadbalancer_vip }}"
+
+    collection_dev:
+      hosts: "{{ groups.get('role_development', []) }}"
+      vars:
+        collection_namespace: myorg
+
+    monitoring:
+      hosts: "{{ groups.get('role_monitoring', []) }}"
+      vars:
+        grafana_admin_password: "{{ vault_grafana_admin_password }}"
+
+    remote_control:
+      hosts: "{{ groups.get('role_control', []) }}"
+      vars:
+        semaphore_admin_password: "{{ vault_semaphore_admin_password }}"
+
+# Required EC2 Instance Tags for this inventory:
+#
+# Role: tower | database | loadbalancer | development | monitoring | control
+# Component: tower-node1 | db-primary | lb-node1 | dev-server | etc.
+# Environment: production | staging | development
+# Project: ansible-tower-ha
+# AnsibleUser: ec2-user | ubuntu | centos (optional, defaults to ec2-user)
+# PostgreSQLRole: primary | standby (for database instances only)
+# KeepalivedPriority: 100 | 90 (for load balancer instances only)
+#
+# Example tags for a Tower node:
+# - Role: tower
+# - Component: tower-node1
+# - Environment: production
+# - Project: ansible-tower-ha
+# - AnsibleUser: ec2-user

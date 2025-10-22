@@ -1,0 +1,98 @@
+---
+# Example: Dynamic DNS-based Assignment
+# Use this when hosts are registered in DNS and you prefer hostname resolution
+
+all:
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+    ansible_become: true
+    ansible_become_method: sudo
+
+    # Enable dynamic assignment via DNS
+    use_static_ips: false
+
+    # DNS domain for host resolution
+    ansible_domain: "internal.company.com"  # Change to your domain
+
+    # Network configuration (for reference and VIP assignment)
+    network_config:
+      base_network: "192.168.1.0/24"
+      vips:
+        loadbalancer_vip: "192.168.1.30"  # Still need VIP for load balancer
+
+    # Connection settings
+    default_ansible_user: ansible
+    default_ssh_port: 22
+
+  children:
+    tower_cluster:
+      hosts:
+        # DNS resolution: tower-node1.internal.company.com
+        tower-node1:
+          ansible_host: "{{ inventory_hostname }}.{{ ansible_domain }}"
+          ansible_user: "{{ default_ansible_user }}"
+        tower-node2:
+          ansible_host: "{{ inventory_hostname }}.{{ ansible_domain }}"
+          ansible_user: "{{ default_ansible_user }}"
+        tower-node3:
+          ansible_host: "{{ inventory_hostname }}.{{ ansible_domain }}"
+          ansible_user: "{{ default_ansible_user }}"
+      vars:
+        tower_admin_password: "{{ vault_tower_admin_password }}"
+        tower_pg_password: "{{ vault_tower_pg_password }}"
+
+    database_cluster:
+      hosts:
+        # DNS resolution: db-primary.internal.company.com
+        db-primary:
+          ansible_host: "{{ inventory_hostname }}.{{ ansible_domain }}"
+          ansible_user: "{{ default_ansible_user }}"
+          postgresql_role: primary
+        db-standby1:
+          ansible_host: "{{ inventory_hostname }}.{{ ansible_domain }}"
+          ansible_user: "{{ default_ansible_user }}"
+          postgresql_role: standby
+        db-standby2:
+          ansible_host: "{{ inventory_hostname }}.{{ ansible_domain }}"
+          ansible_user: "{{ default_ansible_user }}"
+          postgresql_role: standby
+      vars:
+        postgresql_version: 13
+        postgresql_replication_password: "{{ vault_pg_replication_password }}"
+
+    load_balancers:
+      hosts:
+        lb-node1:
+          ansible_host: "{{ inventory_hostname }}.{{ ansible_domain }}"
+          ansible_user: "{{ default_ansible_user }}"
+          keepalived_priority: 100
+        lb-node2:
+          ansible_host: "{{ inventory_hostname }}.{{ ansible_domain }}"
+          ansible_user: "{{ default_ansible_user }}"
+          keepalived_priority: 90
+      vars:
+        keepalived_vip: "{{ network_config.vips.loadbalancer_vip }}"
+
+    collection_dev:
+      hosts:
+        dev-server:
+          ansible_host: "{{ inventory_hostname }}.{{ ansible_domain }}"
+          ansible_user: "{{ default_ansible_user }}"
+      vars:
+        collection_namespace: myorg
+
+    monitoring:
+      hosts:
+        monitoring-server:
+          ansible_host: "{{ inventory_hostname }}.{{ ansible_domain }}"
+          ansible_user: "{{ default_ansible_user }}"
+      vars:
+        grafana_admin_password: "{{ vault_grafana_admin_password }}"
+
+    remote_control:
+      hosts:
+        control-server:
+          ansible_host: "{{ inventory_hostname }}.{{ ansible_domain }}"
+          ansible_user: "{{ default_ansible_user }}"
+      vars:
+        semaphore_admin_password: "{{ vault_semaphore_admin_password }}"
