@@ -1,0 +1,114 @@
+---
+# Main playbook for deploying HA Ansible Tower with Collection Dev Server
+- name: Deploy PostgreSQL HA Cluster
+  hosts: database_cluster
+  gather_facts: true
+  roles:
+    - postgresql_ha
+  tags:
+    - database
+    - postgresql
+
+- name: Deploy Load Balancers
+  hosts: load_balancers
+  gather_facts: true
+  tasks:
+    - name: Install HAProxy
+      package:
+        name: haproxy
+        state: present
+
+    - name: Configure HAProxy for Tower
+      template:
+        src: templates/haproxy.cfg.j2
+        dest: /etc/haproxy/haproxy.cfg
+        mode: '0644'
+      notify: restart haproxy
+
+    - name: Install Keepalived for VIP
+      package:
+        name: keepalived
+        state: present
+
+    - name: Configure Keepalived
+      template:
+        src: templates/keepalived.conf.j2
+        dest: /etc/keepalived/keepalived.conf
+        mode: '0644'
+      notify: restart keepalived
+
+    - name: Enable and start HAProxy
+      service:
+        name: haproxy
+        state: started
+        enabled: true
+
+    - name: Enable and start Keepalived
+      service:
+        name: keepalived
+        state: started
+        enabled: true
+
+  handlers:
+    - name: restart haproxy
+      service:
+        name: haproxy
+        state: restarted
+
+    - name: restart keepalived
+      service:
+        name: keepalived
+        state: restarted
+
+  tags:
+    - loadbalancer
+    - haproxy
+
+- name: Deploy Ansible Tower HA Cluster
+  hosts: tower_cluster
+  gather_facts: true
+  roles:
+    - tower_ha
+  tags:
+    - tower
+    - awx
+
+- name: Deploy Collection Development Server
+  hosts: collection_dev
+  gather_facts: true
+  roles:
+    - collection_dev
+  tags:
+    - collection
+    - development
+
+- name: Deploy Monitoring Stack
+  hosts: monitoring
+  gather_facts: true
+  roles:
+    - monitoring
+  tags:
+    - monitoring
+    - prometheus
+    - grafana
+
+- name: Deploy Remote Control Server
+  hosts: remote_control
+  gather_facts: true
+  roles:
+    - remote_control
+  tags:
+    - remote_control
+    - semaphore
+
+- name: Configure Monitoring Exporters on All Nodes
+  hosts: all
+  gather_facts: true
+  tasks:
+    - name: Install Node Exporter
+      include_role:
+        name: monitoring
+        tasks_from: exporters
+  tags:
+    - exporters
+    - monitoring

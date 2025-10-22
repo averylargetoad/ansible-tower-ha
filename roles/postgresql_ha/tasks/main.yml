@@ -1,0 +1,117 @@
+---
+# PostgreSQL HA Role - Main Tasks
+- name: Include OS-specific variables
+  include_vars: "{{ ansible_os_family }}.yml"
+
+- name: Install PostgreSQL and dependencies
+  package:
+    name: "{{ postgresql_packages }}"
+    state: present
+
+- name: Ensure PostgreSQL is running
+  service:
+    name: postgresql
+    state: started
+    enabled: true
+
+- name: Configure PostgreSQL for replication
+  block:
+    - name: Set PostgreSQL configuration for primary
+      template:
+        src: postgresql.conf.j2
+        dest: "{{ postgresql_config_dir }}/postgresql.conf"
+        owner: postgres
+        group: postgres
+        mode: '0644'
+      notify: restart postgresql
+      when: postgresql_role == 'primary'
+
+    - name: Set pg_hba.conf for replication
+      template:
+        src: pg_hba.conf.j2
+        dest: "{{ postgresql_config_dir }}/pg_hba.conf"
+        owner: postgres
+        group: postgres
+        mode: '0640'
+      notify: restart postgresql
+
+    - name: Create replication user on primary
+      postgresql_user:
+        name: replicator
+        password: "{{ vault_pg_replication_password }}"
+        role_attr_flags: REPLICATION,LOGIN
+        state: present
+      become_user: postgres
+      when: postgresql_role == 'primary'
+
+    - name: Create Tower database on primary
+      postgresql_db:
+        name: "{{ db_name }}"
+        encoding: UTF-8
+        state: present
+      become_user: postgres
+      when: postgresql_role == 'primary'
+
+    - name: Create Tower database user on primary
+      postgresql_user:
+        db: "{{ db_name }}"
+        name: "{{ db_user }}"
+        password: "{{ vault_tower_pg_password }}"
+        priv: ALL
+        state: present
+      become_user: postgres
+      when: postgresql_role == 'primary'
+
+- name: Configure standby servers
+  block:
+    - name: Stop PostgreSQL on standby
+      service:
+        name: postgresql
+        state: stopped
+      when: postgresql_role == 'standby'
+
+    - name: Remove existing data directory on standby
+      file:
+        path: "{{ postgresql_data_dir }}"
+        state: absent
+      when: postgresql_role == 'standby'
+
+    - name: Create base backup from primary
+      command: >
+        pg_basebackup -h {{ hostvars[groups['database_cluster'][0]].ansible_host }}
+        -D {{ postgresql_data_dir }}
+        -U replicator -v -P -W
+      environment:
+        PGPASSWORD: "{{ vault_pg_replication_password }}"
+      become_user: postgres
+      when: postgresql_role == 'standby'
+
+    - name: Create recovery.conf for standby
+      template:
+        src: recovery.conf.j2
+        dest: "{{ postgresql_data_dir }}/recovery.conf"
+        owner: postgres
+        group: postgres
+        mode: '0600'
+      when: postgresql_role == 'standby'
+
+    - name: Start PostgreSQL on standby
+      service:
+        name: postgresql
+        state: started
+        enabled: true
+      when: postgresql_role == 'standby'
+
+- name: Configure firewall for PostgreSQL
+  firewalld:
+    port: 5432/tcp
+    permanent: true
+    state: enabled
+    immediate: true
+  when: ansible_os_family == "RedHat"
+
+- name: Install monitoring tools
+  package:
+    name:
+      - postgresql-contrib
+    state: present

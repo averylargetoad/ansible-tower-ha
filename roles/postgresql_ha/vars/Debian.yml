@@ -1,0 +1,6 @@
+---
+# PostgreSQL packages for Debian family
+postgresql_packages:
+  - postgresql-{{ postgresql_version }}
+  - postgresql-contrib-{{ postgresql_version }}
+  - python3-psycopg2

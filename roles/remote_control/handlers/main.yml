@@ -1,0 +1,7 @@
+---
+# Remote Control Role - Handlers
+- name: restart semaphore
+  systemd:
+    name: semaphore
+    state: restarted
+    daemon_reload: yes

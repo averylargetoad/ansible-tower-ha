@@ -1,0 +1,7 @@
+---
+# PostgreSQL packages for RedHat family
+postgresql_packages:
+  - postgresql{{ postgresql_version }}
+  - postgresql{{ postgresql_version }}-server
+  - postgresql{{ postgresql_version }}-contrib
+  - python3-psycopg2

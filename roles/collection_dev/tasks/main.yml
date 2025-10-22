@@ -1,0 +1,282 @@
+---
+# Collection Development Server Role - Main Tasks
+- name: Create development user
+  user:
+    name: "{{ collection_dev_user }}"
+    state: present
+    shell: /bin/bash
+    create_home: yes
+
+- name: Install development tools and dependencies
+  package:
+    name:
+      - git
+      - python3
+      - python3-pip
+      - python3-venv
+      - vim
+      - tmux
+      - tree
+      - jq
+      - curl
+      - wget
+      - rsync
+    state: present
+
+- name: Install Ansible and development tools via pip
+  pip:
+    name: "{{ required_python_packages }}"
+    state: present
+    extra_args: --user
+  become_user: "{{ collection_dev_user }}"
+
+- name: Create collection workspace directory
+  file:
+    path: "{{ collection_dev_workspace }}"
+    state: directory
+    owner: "{{ collection_dev_user }}"
+    group: "{{ collection_dev_user }}"
+    mode: '0755'
+
+- name: Create ansible.cfg for development
+  copy:
+    dest: "{{ collection_dev_home }}/.ansible.cfg"
+    owner: "{{ collection_dev_user }}"
+    group: "{{ collection_dev_user }}"
+    mode: '0644'
+    content: |
+      [defaults]
+      collections_path = {{ collection_dev_workspace }}
+      roles_path = {{ collection_dev_workspace }}/roles
+      inventory = {{ collection_dev_workspace }}/inventory
+      retry_files_enabled = False
+      host_key_checking = False
+      stdout_callback = yaml
+
+      [galaxy]
+      server_list = release_galaxy
+
+      [galaxy_server.release_galaxy]
+      url = {{ ansible_galaxy_server_url }}
+
+- name: Configure Git
+  git_config:
+    name: "{{ item.name }}"
+    value: "{{ item.value }}"
+    scope: global
+  loop:
+    - { name: "user.name", value: "{{ git_user_name }}" }
+    - { name: "user.email", value: "{{ git_user_email }}" }
+    - { name: "init.defaultBranch", value: "main" }
+  become_user: "{{ collection_dev_user }}"
+
+- name: Create collection skeleton structure
+  file:
+    path: "{{ collection_dev_workspace }}/ansible_collections/{{ collection_namespace }}"
+    state: directory
+    owner: "{{ collection_dev_user }}"
+    group: "{{ collection_dev_user }}"
+    mode: '0755'
+
+- name: Install Ansible Navigator
+  pip:
+    name: ansible-navigator
+    state: present
+  when: install_ansible_navigator | bool
+
+- name: Create development scripts directory
+  file:
+    path: "{{ collection_dev_home }}/bin"
+    state: directory
+    owner: "{{ collection_dev_user }}"
+    group: "{{ collection_dev_user }}"
+    mode: '0755'
+
+- name: Create collection initialization script
+  copy:
+    dest: "{{ collection_dev_home }}/bin/init-collection.sh"
+    owner: "{{ collection_dev_user }}"
+    group: "{{ collection_dev_user }}"
+    mode: '0755'
+    content: |
+      #!/bin/bash
+      # Initialize a new Ansible collection
+
+      if [ $# -ne 1 ]; then
+          echo "Usage: $0 <collection_name>"
+          exit 1
+      fi
+
+      COLLECTION_NAME=$1
+      COLLECTION_PATH="{{ collection_dev_workspace }}/ansible_collections/{{ collection_namespace }}/${COLLECTION_NAME}"
+
+      echo "Initializing collection {{ collection_namespace }}.${COLLECTION_NAME}..."
+
+      ansible-galaxy collection init {{ collection_namespace }}.${COLLECTION_NAME} \
+          --init-path {{ collection_dev_workspace }}/ansible_collections/{{ collection_namespace }}
+
+      cd "${COLLECTION_PATH}"
+
+      # Initialize git repository
+      git init
+      git add .
+      git commit -m "Initial commit: {{ collection_namespace }}.${COLLECTION_NAME}"
+
+      # Create molecule testing structure
+      mkdir -p molecule/default
+
+      echo "Collection initialized at: ${COLLECTION_PATH}"
+      echo "Next steps:"
+      echo "  cd ${COLLECTION_PATH}"
+      echo "  # Add your roles, modules, and plugins"
+      echo "  ansible-galaxy collection build"
+      echo "  ansible-galaxy collection install {{ collection_namespace }}-${COLLECTION_NAME}-*.tar.gz"
+
+- name: Create collection build script
+  copy:
+    dest: "{{ collection_dev_home }}/bin/build-collection.sh"
+    owner: "{{ collection_dev_user }}"
+    group: "{{ collection_dev_user }}"
+    mode: '0755'
+    content: |
+      #!/bin/bash
+      # Build and test an Ansible collection
+
+      if [ ! -f "galaxy.yml" ]; then
+          echo "Error: galaxy.yml not found. Run this script from collection root."
+          exit 1
+      fi
+
+      echo "Running ansible-lint..."
+      ansible-lint || true
+
+      echo "Running yamllint..."
+      yamllint . || true
+
+      echo "Building collection..."
+      ansible-galaxy collection build --force
+
+      echo "Build complete! Artifacts:"
+      ls -lh *.tar.gz
+
+- name: Create molecule test script
+  copy:
+    dest: "{{ collection_dev_home }}/bin/test-collection.sh"
+    owner: "{{ collection_dev_user }}"
+    group: "{{ collection_dev_user }}"
+    mode: '0755'
+    content: |
+      #!/bin/bash
+      # Test collection with molecule
+
+      if [ ! -d "molecule" ]; then
+          echo "Initializing molecule..."
+          molecule init scenario default --driver-name docker
+      fi
+
+      echo "Running molecule tests..."
+      molecule test
+
+- name: Create .bashrc additions for development
+  blockinfile:
+    path: "{{ collection_dev_home }}/.bashrc"
+    block: |
+      # Ansible Collection Development Environment
+      export PATH="{{ collection_dev_home }}/bin:$PATH"
+      export ANSIBLE_COLLECTIONS_PATH="{{ collection_dev_workspace }}"
+
+      # Helpful aliases
+      alias ll='ls -la'
+      alias ansible-build='{{ collection_dev_home }}/bin/build-collection.sh'
+      alias ansible-test='{{ collection_dev_home }}/bin/test-collection.sh'
+
+      # PS1 prompt with git branch
+      parse_git_branch() {
+        git branch 2> /dev/null | sed -e '/^[^*]/d' -e 's/* \(.*\)/ (\1)/'
+      }
+      export PS1='\u@\h:\w\[\033[32m\]$(parse_git_branch)\[\033[00m\] $ '
+    marker: "# {mark} ANSIBLE COLLECTION DEV ENV"
+    create: yes
+    owner: "{{ collection_dev_user }}"
+    group: "{{ collection_dev_user }}"
+
+- name: Clone specified collection repositories
+  git:
+    repo: "{{ item }}"
+    dest: "{{ collection_dev_workspace }}/repos/{{ item | basename | regex_replace('\\.git$', '') }}"
+    version: main
+  loop: "{{ collection_git_repos }}"
+  become_user: "{{ collection_dev_user }}"
+  when: collection_git_repos | length > 0
+
+- name: Create README for development environment
+  copy:
+    dest: "{{ collection_dev_home }}/README.md"
+    owner: "{{ collection_dev_user }}"
+    group: "{{ collection_dev_user }}"
+    mode: '0644'
+    content: |
+      # Ansible Collection Development Environment
+
+      ## Quick Start
+
+      ### Initialize a new collection
+      ```bash
+      init-collection.sh my_collection
+      ```
+
+      ### Build a collection
+      ```bash
+      cd {{ collection_dev_workspace }}/ansible_collections/{{ collection_namespace }}/my_collection
+      ansible-build
+      ```
+
+      ### Test a collection
+      ```bash
+      cd {{ collection_dev_workspace }}/ansible_collections/{{ collection_namespace }}/my_collection
+      ansible-test
+      ```
+
+      ## Directory Structure
+
+      - `{{ collection_dev_workspace }}/`: Collection workspace
+      - `{{ collection_dev_workspace }}/ansible_collections/`: Collections directory
+      - `{{ collection_dev_workspace }}/repos/`: Cloned repositories
+      - `{{ collection_dev_home }}/bin/`: Development scripts
+
+      ## Tools Installed
+
+      - Ansible {{ ansible_version }}
+      - ansible-lint
+      - molecule
+      - yamllint
+      - ansible-navigator
+
+      ## Useful Commands
+
+      ```bash
+      # List collections
+      ansible-galaxy collection list
+
+      # Lint a collection
+      ansible-lint
+
+      # Build a collection
+      ansible-galaxy collection build
+
+      # Install a collection locally
+      ansible-galaxy collection install ./my_namespace-my_collection-1.0.0.tar.gz
+
+      # Run molecule tests
+      molecule test
+      ```
+
+- name: Configure firewall for development server
+  firewalld:
+    port: "{{ item }}"
+    permanent: true
+    state: enabled
+    immediate: true
+  loop:
+    - 22/tcp   # SSH
+  when: ansible_os_family == "RedHat"

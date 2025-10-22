@@ -1,0 +1,160 @@
+---
+# Install Prometheus exporters on monitored nodes
+- name: Install Node Exporter
+  block:
+    - name: Download Node Exporter
+      get_url:
+        url: "https://github.com/prometheus/node_exporter/releases/download/v1.6.1/node_exporter-1.6.1.linux-amd64.tar.gz"
+        dest: /tmp/node_exporter.tar.gz
+        mode: '0644'
+
+    - name: Extract Node Exporter
+      unarchive:
+        src: /tmp/node_exporter.tar.gz
+        dest: /tmp/
+        remote_src: yes
+
+    - name: Install Node Exporter binary
+      copy:
+        src: /tmp/node_exporter-1.6.1.linux-amd64/node_exporter
+        dest: /usr/local/bin/node_exporter
+        mode: '0755'
+        remote_src: yes
+
+    - name: Create Node Exporter systemd service
+      copy:
+        dest: /etc/systemd/system/node_exporter.service
+        content: |
+          [Unit]
+          Description=Node Exporter
+          After=network.target
+
+          [Service]
+          Type=simple
+          User=prometheus
+          ExecStart=/usr/local/bin/node_exporter
+          Restart=on-failure
+
+          [Install]
+          WantedBy=multi-user.target
+        mode: '0644'
+
+    - name: Enable and start Node Exporter
+      systemd:
+        name: node_exporter
+        state: started
+        enabled: yes
+        daemon_reload: yes
+
+- name: Install PostgreSQL Exporter on database nodes
+  block:
+    - name: Download Postgres Exporter
+      get_url:
+        url: "https://github.com/prometheus-community/postgres_exporter/releases/download/v0.13.2/postgres_exporter-0.13.2.linux-amd64.tar.gz"
+        dest: /tmp/postgres_exporter.tar.gz
+        mode: '0644'
+
+    - name: Extract Postgres Exporter
+      unarchive:
+        src: /tmp/postgres_exporter.tar.gz
+        dest: /tmp/
+        remote_src: yes
+
+    - name: Install Postgres Exporter binary
+      copy:
+        src: /tmp/postgres_exporter-0.13.2.linux-amd64/postgres_exporter
+        dest: /usr/local/bin/postgres_exporter
+        mode: '0755'
+        remote_src: yes
+
+    - name: Create Postgres Exporter systemd service
+      copy:
+        dest: /etc/systemd/system/postgres_exporter.service
+        content: |
+          [Unit]
+          Description=PostgreSQL Exporter
+          After=network.target
+
+          [Service]
+          Type=simple
+          User=prometheus
+          Environment="DATA_SOURCE_NAME=postgresql://{{ db_user }}:{{ vault_tower_pg_password }}@localhost:5432/{{ db_name }}?sslmode=disable"
+          ExecStart=/usr/local/bin/postgres_exporter
+          Restart=on-failure
+
+          [Install]
+          WantedBy=multi-user.target
+        mode: '0644'
+
+    - name: Enable and start Postgres Exporter
+      systemd:
+        name: postgres_exporter
+        state: started
+        enabled: yes
+        daemon_reload: yes
+  when: inventory_hostname in groups['database_cluster']
+
+- name: Install HAProxy Exporter on load balancer nodes
+  block:
+    - name: Download HAProxy Exporter
+      get_url:
+        url: "https://github.com/prometheus/haproxy_exporter/releases/download/v0.15.0/haproxy_exporter-0.15.0.linux-amd64.tar.gz"
+        dest: /tmp/haproxy_exporter.tar.gz
+        mode: '0644'
+
+    - name: Extract HAProxy Exporter
+      unarchive:
+        src: /tmp/haproxy_exporter.tar.gz
+        dest: /tmp/
+        remote_src: yes
+
+    - name: Install HAProxy Exporter binary
+      copy:
+        src: /tmp/haproxy_exporter-0.15.0.linux-amd64/haproxy_exporter
+        dest: /usr/local/bin/haproxy_exporter
+        mode: '0755'
+        remote_src: yes
+
+    - name: Enable HAProxy stats socket
+      lineinfile:
+        path: /etc/haproxy/haproxy.cfg
+        line: "    stats socket /var/lib/haproxy/stats"
+        insertafter: "^global"
+
+    - name: Create HAProxy Exporter systemd service
+      copy:
+        dest: /etc/systemd/system/haproxy_exporter.service
+        content: |
+          [Unit]
+          Description=HAProxy Exporter
+          After=network.target
+
+          [Service]
+          Type=simple
+          User=prometheus
+          ExecStart=/usr/local/bin/haproxy_exporter --haproxy.scrape-uri=unix:/var/lib/haproxy/stats
+          Restart=on-failure
+
+          [Install]
+          WantedBy=multi-user.target
+        mode: '0644'
+
+    - name: Enable and start HAProxy Exporter
+      systemd:
+        name: haproxy_exporter
+        state: started
+        enabled: yes
+        daemon_reload: yes
+  when: inventory_hostname in groups['load_balancers']
+
+- name: Configure firewall for exporters
+  firewalld:
+    port: "{{ item }}"
+    permanent: true
+    state: enabled
+    immediate: true
+  loop:
+    - 9100/tcp  # Node Exporter
+    - 9187/tcp  # Postgres Exporter
+    - 9101/tcp  # HAProxy Exporter
+  when: ansible_os_family == "RedHat"

@@ -1,0 +1,93 @@
+---
+# Global configuration variables for Ansible Tower HA deployment
+
+# Tower/AWX Configuration
+tower_version: "3.8.6"
+tower_admin_user: admin
+tower_install_dir: /opt/ansible-tower
+tower_package_url: "https://releases.ansible.com/ansible-tower/setup/ansible-tower-setup-{{ tower_version }}.tar.gz"
+
+# Database Configuration
+db_host: "192.168.1.21"  # Primary database host
+db_port: 5432
+db_name: awx
+db_user: awx
+# Passwords should be in vault - see group_vars/vault.yml
+
+# Redis Configuration (for Tower cache)
+redis_host: localhost
+redis_port: 6379
+
+# RabbitMQ Configuration (for Tower messaging)
+rabbitmq_host: localhost
+rabbitmq_port: 5672
+rabbitmq_user: tower
+rabbitmq_vhost: tower
+
+# Load Balancer Configuration
+lb_algorithm: roundrobin
+lb_stats_enable: true
+lb_stats_port: 8080
+lb_stats_user: admin
+
+# PostgreSQL HA Configuration
+postgresql_data_dir: /var/lib/postgresql/{{ postgresql_version }}/main
+postgresql_config_dir: /etc/postgresql/{{ postgresql_version }}/main
+postgresql_max_connections: 200
+postgresql_shared_buffers: 256MB
+postgresql_effective_cache_size: 1GB
+postgresql_maintenance_work_mem: 64MB
+postgresql_checkpoint_completion_target: 0.9
+postgresql_wal_buffers: 16MB
+postgresql_default_statistics_target: 100
+postgresql_random_page_cost: 4
+postgresql_effective_io_concurrency: 2
+postgresql_work_mem: 4MB
+postgresql_min_wal_size: 1GB
+postgresql_max_wal_size: 4GB
+
+# Replication settings
+postgresql_wal_level: replica
+postgresql_max_wal_senders: 10
+postgresql_wal_keep_segments: 10
+postgresql_hot_standby: "on"
+
+# Collection Development Server Configuration
+collection_dev_user: developer
+collection_dev_home: /home/{{ collection_dev_user }}
+collection_dev_workspace: "{{ collection_dev_home }}/collections"
+ansible_version: "2.15"
+ansible_galaxy_cli_version: latest
+
+# Python and dependencies
+python_version: "3.9"
+required_python_packages:
+  - ansible
+  - ansible-lint
+  - molecule
+  - yamllint
+  - jmespath
+
+# Git configuration
+git_user_name: "Collection Developer"
+git_user_email: "developer@example.com"
+
+# Development tools
+install_vscode: false
+install_ansible_navigator: true
+install_execution_environments: true
+
+# Firewall rules
+firewall_allowed_ports:
+  - 80/tcp    # HTTP
+  - 443/tcp   # HTTPS
+  - 5432/tcp  # PostgreSQL
+  - 8080/tcp  # HAProxy stats
+
+# SELinux configuration
+selinux_state: enforcing
+
+# Backup configuration
+backup_enabled: true
+backup_dir: /var/backups/ansible-tower
+backup_retention_days: 7

@@ -1,0 +1,19 @@
+---
+# Example vault file - encrypt this with: ansible-vault encrypt vault.yml
+# Copy this file to vault.yml and update with your actual passwords
+# Then encrypt: ansible-vault encrypt group_vars/vault.yml
+
+vault_tower_admin_password: "ChangeMe123!"
+vault_tower_pg_password: "SecureDBPassword123!"
+vault_pg_replication_password: "ReplicationPass123!"
+vault_rabbitmq_password: "RabbitMQPass123!"
+vault_lb_stats_password: "StatsPassword123!"
+vault_keepalived_password: "KeepalivedPass123!"
+vault_grafana_admin_password: "GrafanaAdmin123!"
+vault_grafana_secret_key: "changeme-grafana-secret-key-32-chars-minimum"
+vault_smtp_password: "SMTPPassword123!"
+vault_semaphore_admin_password: "SemaphoreAdmin123!"
+vault_semaphore_db_password: "SemaphoreDB123!"
+vault_semaphore_cookie_hash: "changeme-cookie-hash-32-characters-long-minimum"
+vault_semaphore_cookie_encryption: "changeme-encryption-key-string-32-chars-min"
+vault_semaphore_access_key: "changeme-access-key-encryption-32-chars-minimum"

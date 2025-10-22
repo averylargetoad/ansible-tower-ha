@@ -1,0 +1,326 @@
+---
+# Remote Control/Management Server Role - Main Tasks
+# Installs Ansible Semaphore for web-based Ansible management
+
+- name: Install prerequisites
+  package:
+    name:
+      - git
+      - curl
+      - wget
+      - mysql-server
+      - python3-pymysql
+    state: present
+
+- name: Start and enable MySQL
+  service:
+    name: mysqld
+    state: started
+    enabled: yes
+  when: ansible_os_family == "RedHat"
+
+- name: Start and enable MySQL (Debian)
+  service:
+    name: mysql
+    state: started
+    enabled: yes
+  when: ansible_os_family == "Debian"
+
+- name: Create Semaphore database
+  mysql_db:
+    name: semaphore
+    state: present
+    login_unix_socket: /var/run/mysqld/mysqld.sock
+  when: ansible_os_family == "Debian"
+
+- name: Create Semaphore database (RedHat)
+  mysql_db:
+    name: semaphore
+    state: present
+  when: ansible_os_family == "RedHat"
+
+- name: Create Semaphore database user
+  mysql_user:
+    name: semaphore
+    password: "{{ vault_semaphore_db_password | default('changeme') }}"
+    priv: 'semaphore.*:ALL'
+    state: present
+    login_unix_socket: /var/run/mysqld/mysqld.sock
+  when: ansible_os_family == "Debian"
+
+- name: Create Semaphore database user (RedHat)
+  mysql_user:
+    name: semaphore
+    password: "{{ vault_semaphore_db_password | default('changeme') }}"
+    priv: 'semaphore.*:ALL'
+    state: present
+  when: ansible_os_family == "RedHat"
+
+- name: Download Ansible Semaphore
+  get_url:
+    url: "https://github.com/ansible-semaphore/semaphore/releases/download/v{{ semaphore_version }}/semaphore_{{ semaphore_version }}_linux_amd64.tar.gz"
+    dest: /tmp/semaphore.tar.gz
+    mode: '0644'
+
+- name: Extract Semaphore
+  unarchive:
+    src: /tmp/semaphore.tar.gz
+    dest: /usr/local/bin/
+    remote_src: yes
+    mode: '0755'
+
+- name: Create Semaphore directories
+  file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0755'
+  loop:
+    - /etc/semaphore
+    - /var/lib/semaphore
+    - /var/log/semaphore
+
+- name: Create Semaphore configuration
+  template:
+    src: semaphore_config.json.j2
+    dest: /etc/semaphore/config.json
+    mode: '0600'
+
+- name: Initialize Semaphore database
+  command: semaphore migrate --config /etc/semaphore/config.json
+  args:
+    creates: /var/lib/semaphore/.migrated
+  register: semaphore_migrate
+
+- name: Mark migration as complete
+  file:
+    path: /var/lib/semaphore/.migrated
+    state: touch
+    mode: '0644'
+  when: semaphore_migrate.changed
+
+- name: Create Semaphore admin user
+  command: >
+    semaphore user add --admin
+    --login admin
+    --name "Admin User"
+    --email admin@example.com
+    --password "{{ semaphore_admin_password }}"
+    --config /etc/semaphore/config.json
+  args:
+    creates: /var/lib/semaphore/.admin_created
+  register: semaphore_admin
+
+- name: Mark admin creation as complete
+  file:
+    path: /var/lib/semaphore/.admin_created
+    state: touch
+    mode: '0644'
+  when: semaphore_admin.changed
+
+- name: Create Semaphore systemd service
+  template:
+    src: semaphore.service.j2
+    dest: /etc/systemd/system/semaphore.service
+    mode: '0644'
+  notify: restart semaphore
+
+- name: Enable and start Semaphore
+  systemd:
+    name: semaphore
+    state: started
+    enabled: yes
+    daemon_reload: yes
+
+- name: Install Ansible on control server
+  pip:
+    name:
+      - ansible
+      - ansible-lint
+    state: present
+
+- name: Create Ansible configuration for Semaphore
+  copy:
+    dest: /etc/ansible/ansible.cfg
+    content: |
+      [defaults]
+      host_key_checking = False
+      retry_files_enabled = False
+      stdout_callback = yaml
+      inventory = /var/lib/semaphore/inventory
+
+      [privilege_escalation]
+      become = True
+      become_method = sudo
+    mode: '0644'
+
+- name: Create SSH directory for Semaphore
+  file:
+    path: /var/lib/semaphore/.ssh
+    state: directory
+    mode: '0700'
+    owner: root
+    group: root
+
+- name: Generate SSH key for Semaphore
+  openssh_keypair:
+    path: /var/lib/semaphore/.ssh/id_rsa
+    type: rsa
+    size: 4096
+    state: present
+
+- name: Create Semaphore projects directory
+  file:
+    path: /var/lib/semaphore/projects
+    state: directory
+    mode: '0755'
+
+- name: Create REST API monitoring endpoint script
+  copy:
+    dest: /usr/local/bin/semaphore-api-monitor.py
+    mode: '0755'
+    content: |
+      #!/usr/bin/env python3
+      """
+      Semaphore API monitoring endpoint for Prometheus alerts
+      Listens for webhook alerts and can trigger Ansible playbooks
+      """
+      from http.server import HTTPServer, BaseHTTPRequestHandler
+      import json
+      import subprocess
+      import logging
+
+      logging.basicConfig(level=logging.INFO)
+      logger = logging.getLogger(__name__)
+
+      class AlertHandler(BaseHTTPRequestHandler):
+          def do_POST(self):
+              if self.path == '/api/alerts':
+                  content_length = int(self.headers['Content-Length'])
+                  post_data = self.rfile.read(content_length)
+
+                  try:
+                      alerts = json.loads(post_data)
+                      logger.info(f"Received {len(alerts.get('alerts', []))} alerts")
+
+                      for alert in alerts.get('alerts', []):
+                          self.process_alert(alert)
+
+                      self.send_response(200)
+                      self.end_headers()
+                      self.wfile.write(b'OK')
+                  except Exception as e:
+                      logger.error(f"Error processing alerts: {e}")
+                      self.send_response(500)
+                      self.end_headers()
+              else:
+                  self.send_response(404)
+                  self.end_headers()
+
+          def process_alert(self, alert):
+              """Process incoming alert and trigger remediation if needed"""
+              alertname = alert.get('labels', {}).get('alertname')
+              status = alert.get('status')
+
+              logger.info(f"Alert: {alertname}, Status: {status}")
+
+              # Add custom remediation logic here
+              # Example: trigger Ansible playbook based on alert type
+
+          def log_message(self, format, *args):
+              logger.info(format % args)
+
+      if __name__ == '__main__':
+          server = HTTPServer(('0.0.0.0', 8080), AlertHandler)
+          logger.info("Starting Semaphore API monitor on port 8080...")
+          server.serve_forever()
+
+- name: Create API monitor systemd service
+  copy:
+    dest: /etc/systemd/system/semaphore-api-monitor.service
+    content: |
+      [Unit]
+      Description=Semaphore API Monitor
+      After=network.target
+
+      [Service]
+      Type=simple
+      User=root
+      ExecStart=/usr/local/bin/semaphore-api-monitor.py
+      Restart=always
+      RestartSec=5
+
+      [Install]
+      WantedBy=multi-user.target
+    mode: '0644'
+
+- name: Enable and start API monitor
+  systemd:
+    name: semaphore-api-monitor
+    state: started
+    enabled: yes
+    daemon_reload: yes
+
+- name: Configure firewall for Semaphore
+  firewalld:
+    port: "{{ item }}"
+    permanent: true
+    state: enabled
+    immediate: true
+  loop:
+    - 3000/tcp  # Semaphore Web UI
+    - 8080/tcp  # API Monitor
+  when: ansible_os_family == "RedHat"
+
+- name: Create remote control dashboard HTML
+  copy:
+    dest: /var/lib/semaphore/dashboard.html
+    content: |
+      <!DOCTYPE html>
+      <html>
+      <head>
+          <title>Ansible Tower Remote Control Dashboard</title>
+          <style>
+              body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
+              .container { max-width: 1200px; margin: 0 auto; background: white; padding: 20px; border-radius: 5px; }
+              h1 { color: #333; }
+              .service { display: inline-block; margin: 10px; padding: 15px; background: #e3f2fd; border-radius: 5px; }
+              .service a { text-decoration: none; color: #1976d2; font-weight: bold; }
+              .status { margin-top: 20px; }
+          </style>
+      </head>
+      <body>
+          <div class="container">
+              <h1>Ansible Tower HA - Remote Control Dashboard</h1>
+
+              <h2>Management Services</h2>
+              <div class="service">
+                  <a href="http://{{ ansible_host }}:3000" target="_blank">Semaphore UI</a>
+                  <p>Web-based Ansible playbook execution</p>
+              </div>
+              <div class="service">
+                  <a href="http://{{ hostvars[groups['monitoring'][0]].ansible_host }}:3000" target="_blank">Grafana Dashboards</a>
+                  <p>Monitoring and metrics visualization</p>
+              </div>
+              <div class="service">
+                  <a href="http://{{ hostvars[groups['monitoring'][0]].ansible_host }}:9090" target="_blank">Prometheus</a>
+                  <p>Metrics and alerting</p>
+              </div>
+              <div class="service">
+                  <a href="https://{{ hostvars[groups['load_balancers'][0]].keepalived_vip }}" target="_blank">Ansible Tower</a>
+                  <p>Tower web interface (via load balancer)</p>
+              </div>
+
+              <h2>Quick Actions</h2>
+              <div class="status">
+                  <p>Use Semaphore to execute playbooks against the Tower infrastructure</p>
+                  <ul>
+                      <li>Health checks</li>
+                      <li>Configuration updates</li>
+                      <li>Backup operations</li>
+                      <li>Scaling operations</li>
+                  </ul>
+              </div>
+          </div>
+      </body>
+      </html>
+    mode: '0644'

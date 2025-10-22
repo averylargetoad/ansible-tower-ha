@@ -1,0 +1,95 @@
+# Ansible Tower HA Deployment - Git Ignore
+
+# Vault files with real passwords
+group_vars/vault.yml
+host_vars/*/vault.yml
+
+# Retry files
+*.retry
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv
+
+# Ansible
+*.log
+.ansible/
+ansible.log
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Downloaded packages
+*.tar.gz
+*.zip
+*.rpm
+*.deb
+
+# IDE and Editor files
+.vscode/
+.idea/
+*.sublime-*
+.project
+.pydevproject
+
+# Certificates and keys (if generated locally)
+*.pem
+*.key
+*.crt
+*.csr
+!roles/*/files/*.pem
+
+# Terraform state (if using Terraform for infrastructure)
+*.tfstate
+*.tfstate.backup
+.terraform/
+
+# Local test inventory
+inventory/test/
+inventory/local/
+test_inventory.yml
+
+# Backup files
+*.bak
+*.backup
+
+# Secrets and credentials
+*secret*
+*credential*
+!*example*
+!*template*
+
+# OS files
+Thumbs.db
+.Trashes
+
+# Documentation build artifacts
+docs/_build/
+site/
+
+# Molecule
+.molecule/
+.cache/
+
+# Coverage reports
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+
+# Keep example and template files
+!*.example
+!*.template
+!*-example.*
+!*-template.*

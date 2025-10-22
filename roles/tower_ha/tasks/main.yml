@@ -1,0 +1,139 @@
+---
+# Ansible Tower HA Role - Main Tasks
+- name: Install prerequisite packages
+  package:
+    name:
+      - git
+      - curl
+      - wget
+      - rsync
+      - python3
+      - python3-pip
+    state: present
+
+- name: Create Tower installation directory
+  file:
+    path: "{{ tower_install_dir }}"
+    state: directory
+    mode: '0755'
+
+- name: Download Ansible Tower setup package
+  get_url:
+    url: "{{ tower_package_url }}"
+    dest: "/tmp/ansible-tower-setup.tar.gz"
+    mode: '0644'
+  run_once: true
+  delegate_to: "{{ groups['tower_cluster'][0] }}"
+
+- name: Extract Tower setup package
+  unarchive:
+    src: "/tmp/ansible-tower-setup.tar.gz"
+    dest: "{{ tower_install_dir }}"
+    remote_src: yes
+    extra_opts: [--strip-components=1]
+  run_once: true
+  delegate_to: "{{ groups['tower_cluster'][0] }}"
+
+- name: Create Tower inventory for installation
+  template:
+    src: tower_inventory.j2
+    dest: "{{ tower_install_dir }}/inventory"
+    mode: '0644'
+  run_once: true
+  delegate_to: "{{ groups['tower_cluster'][0] }}"
+
+- name: Run Tower setup script
+  command: ./setup.sh
+  args:
+    chdir: "{{ tower_install_dir }}"
+  run_once: true
+  delegate_to: "{{ groups['tower_cluster'][0] }}"
+  register: tower_setup
+  changed_when: tower_setup.rc == 0
+
+- name: Configure Tower for HA
+  block:
+    - name: Ensure Tower configuration directory exists
+      file:
+        path: /etc/tower
+        state: directory
+        mode: '0755'
+
+    - name: Configure Tower settings for external database
+      template:
+        src: tower_settings.py.j2
+        dest: /etc/tower/settings.py
+        mode: '0644'
+      notify: restart tower services
+
+    - name: Create Tower cluster configuration
+      template:
+        src: cluster.conf.j2
+        dest: /etc/tower/conf.d/cluster.conf
+        mode: '0644'
+      notify: restart tower services
+
+- name: Configure firewall for Tower services
+  firewalld:
+    port: "{{ item }}"
+    permanent: true
+    state: enabled
+    immediate: true
+  loop:
+    - 80/tcp
+    - 443/tcp
+  when: ansible_os_family == "RedHat"
+
+- name: Install and configure RabbitMQ for Tower messaging
+  block:
+    - name: Install RabbitMQ
+      package:
+        name: rabbitmq-server
+        state: present
+
+    - name: Start RabbitMQ service
+      service:
+        name: rabbitmq-server
+        state: started
+        enabled: true
+
+    - name: Create RabbitMQ vhost for Tower
+      rabbitmq_vhost:
+        name: "{{ rabbitmq_vhost }}"
+        state: present
+
+    - name: Create RabbitMQ user for Tower
+      rabbitmq_user:
+        user: "{{ rabbitmq_user }}"
+        password: "{{ vault_rabbitmq_password }}"
+        vhost: "{{ rabbitmq_vhost }}"
+        configure_priv: .*
+        read_priv: .*
+        write_priv: .*
+        state: present
+
+- name: Enable and start Tower services
+  service:
+    name: "{{ item }}"
+    state: started
+    enabled: true
+  loop:
+    - ansible-tower
+    - supervisord
+
+- name: Wait for Tower to be ready
+  uri:
+    url: "https://{{ ansible_host }}/api/v2/ping/"
+    validate_certs: no
+    status_code: 200
+  register: tower_ping
+  until: tower_ping.status == 200
+  retries: 30
+  delay: 10
+
+- name: Configure Tower license
+  awx.awx.license:
+    manifest: "{{ tower_license_file }}"
+  when: tower_license_file is defined
+  run_once: true
+  delegate_to: "{{ groups['tower_cluster'][0] }}"

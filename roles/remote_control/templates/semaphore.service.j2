@@ -1,0 +1,16 @@
+[Unit]
+Description=Ansible Semaphore
+Documentation=https://docs.ansible-semaphore.com
+After=network.target mysqld.service
+
+[Service]
+Type=simple
+User=root
+Group=root
+ExecStart=/usr/local/bin/semaphore service --config /etc/semaphore/config.json
+WorkingDirectory=/var/lib/semaphore
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target
