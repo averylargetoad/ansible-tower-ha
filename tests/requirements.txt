@@ -1,0 +1,42 @@
+# Testing framework dependencies for Ansible Tower HA deployment
+
+# Core Ansible testing tools
+ansible>=2.15.0
+ansible-lint>=6.0.0
+yamllint>=1.28.0
+molecule>=4.0.0
+molecule-docker>=2.0.0
+
+# Python testing framework
+pytest>=7.0.0
+pytest-cov>=4.0.0
+pytest-html>=3.1.0
+pytest-json-report>=1.5.0
+
+# Jinja2 template testing
+jinja2-cli>=0.8.0
+jinja2>=3.0.0
+
+# Configuration validation
+jsonschema>=4.0.0
+pyyaml>=6.0
+
+# Network testing utilities
+netaddr>=0.8.0
+dnspython>=2.2.0
+
+# Mock and testing utilities
+responses>=0.21.0
+requests-mock>=1.9.0
+freezegun>=1.2.0
+
+# Reporting and coverage
+coverage>=6.0.0
+pytest-xvfb>=2.0.0
+
+# Docker for molecule testing
+docker>=6.0.0
+
+# Additional utilities
+colorama>=0.4.0
+tabulate>=0.9.0

@@ -1,0 +1,60 @@
+# YAML Lint configuration for Ansible Tower HA deployment
+
+extends: default
+
+rules:
+  # Line length - allow longer lines for Ansible
+  line-length:
+    max: 120
+    level: warning
+
+  # Comments - require space after #
+  comments:
+    min-spaces-from-content: 1
+
+  # Indentation - use 2 spaces
+  indentation:
+    spaces: 2
+    indent-sequences: true
+    check-multi-line-strings: false
+
+  # Truthy values - allow yes/no for Ansible compatibility
+  truthy:
+    allowed-values: ['true', 'false', 'yes', 'no', 'on', 'off']
+    check-keys: false
+
+  # Empty lines - be flexible with empty lines
+  empty-lines:
+    max: 2
+    max-start: 1
+    max-end: 1
+
+  # Key duplicates - error on duplicate keys
+  key-duplicates: enable
+
+  # Brackets - require consistent spacing
+  brackets:
+    min-spaces-inside: 0
+    max-spaces-inside: 1
+
+  # Braces - require consistent spacing
+  braces:
+    min-spaces-inside: 0
+    max-spaces-inside: 1
+
+  # Commas - require space after comma
+  commas:
+    max-spaces-before: 0
+    min-spaces-after: 1
+    max-spaces-after: 1
+
+# File patterns to ignore
+ignore: |
+  /.git/
+  /.pytest_cache/
+  /__pycache__/
+  /tests/coverage/
+  /tests/reports/
+  *.retry
+  .vault_pass
+  .ansible-vault

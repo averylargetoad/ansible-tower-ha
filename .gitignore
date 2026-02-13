@@ -4,6 +4,13 @@
 group_vars/vault.yml
 host_vars/*/vault.yml
 
+# Vagrant
+.vagrant/
+.dnconfig
+
+# Claude Code
+.claude/
+
 # Retry files
 *.retry
 
