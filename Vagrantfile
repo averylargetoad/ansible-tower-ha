@@ -11,11 +11,13 @@
 # - 1 Remote control node (Semaphore)
 
 Vagrant.configure("2") do |config|
-  # Base box - using Rocky Linux 8 for enterprise compatibility
-  config.vm.box = "rockylinux/8"
-  config.vm.box_version = "~> 8.0"
+  # Base box - bento/rockylinux-8 is optimized for VirtualBox 6.1 on Intel macOS
+  # Includes pre-built VirtualBox Guest Additions for reliable provisioning
+  config.vm.box = "bento/rockylinux-8"
 
   # Global VM settings
+  config.vm.boot_timeout = 600
+
   config.vm.provider "virtualbox" do |vb|
     vb.gui = false
     vb.check_guest_additions = false
